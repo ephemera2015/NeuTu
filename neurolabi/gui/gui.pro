@@ -577,6 +577,8 @@ HEADERS += mainwindow.h \
     protocols/synapsepredictionbodyinputdialog.h \
     protocols/synapsereviewprotocol.h \
     protocols/synapsereviewinputdialog.h \
+    protocols/todoreviewprotocol.h \
+    protocols/todoreviewinputdialog.h \
     zactionlibrary.h \
     zmenufactory.h \
     zcrosshair.h \
@@ -699,7 +701,7 @@ HEADERS += mainwindow.h \
     dialogs/neuprintquerydialog.h \
     dialogs/zflyemtodofilterdialog.h \
     dialogs/zstackframesettingdialog.h \
-    dialogs/neuprintsetupdialog.h
+    dialogs/neuprintsetupdialog.h 
 
 FORMS += dialogs/settingdialog.ui \
     dialogs/frameinfodialog.ui \
@@ -773,6 +775,8 @@ FORMS += dialogs/settingdialog.ui \
     protocols/synapsepredictionbodyinputdialog.ui \
     protocols/synapsereviewprotocol.ui \
     protocols/synapsereviewinputdialog.ui \
+    protocols/todoreviewprotocol.ui \
+    protocols/todoreviewinputdialog.ui \
     protocols/protocoldialog.ui \
     dialogs/flyemsettingdialog.ui \
     dialogs/flyemsynapsefilterdialog.ui \
@@ -802,7 +806,7 @@ FORMS += dialogs/settingdialog.ui \
     dialogs/zflyemtodofilterdialog.ui \
     dialogs/zautotracedialog.ui \
     dialogs/zstackframesettingdialog.ui \
-    dialogs/neuprintsetupdialog.ui
+    dialogs/neuprintsetupdialog.ui 
 
 SOURCES += main.cpp \
     mainwindow.cpp \
@@ -1074,6 +1078,8 @@ SOURCES += main.cpp \
     protocols/synapsepredictionbodyinputdialog.cpp \
     protocols/synapsereviewprotocol.cpp \
     protocols/synapsereviewinputdialog.cpp \
+    protocols/todoreviewprotocol.cpp \
+    protocols/todoreviewinputdialog.cpp \
     zactionlibrary.cpp \
     zmenufactory.cpp \
     zcrosshair.cpp \
