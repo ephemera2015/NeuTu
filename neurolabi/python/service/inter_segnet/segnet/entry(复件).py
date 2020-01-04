@@ -8,17 +8,18 @@ import numpy as np
 from tiffio.baseio import open_tif,save_tif
 
 
-MODEL = './segnet/data/model/model.ckpt-410050'
+MODEL = './segnet/data/model/model.ckpt-30000'
 SHAPE = (24,24,24)
 BATCH_SIZE = 50
 SEG_THRESHOLD = 0.5
 MOVE_THRESHOLD = 0.5
 DELTA = 6
     
-def define_unet(x,seeds):
+
+def define_unet(x,region_seeds,boundary_seeds):
     with tf.variable_scope('unet',reuse = False) as sc:
           
-        layer = tf.concat([x,seeds],axis=4)
+        layer = tf.concat([x,region_seeds,boundary_seeds],axis=4)
         layer1 = tf.layers.conv3d(layer,20,3,1,'SAME')
         layer = tf.layers.conv3d(layer1,20,3,1,'SAME')
         layer = tf.nn.relu(layer)
@@ -79,12 +80,12 @@ def define_graph():
     rv = {}
     
     rv['imgs'] = tf.placeholder(tf.float32,[BATCH_SIZE,*SHAPE,1])
-    rv['seeds'] = tf.placeholder(tf.float32,[BATCH_SIZE,*SHAPE,1])
+    rv['region_seeds'] = tf.placeholder(tf.float32,[BATCH_SIZE,*SHAPE,1])
+    rv['boundary_seeds'] = tf.placeholder(tf.float32,[BATCH_SIZE,*SHAPE,1])
     rv['labels'] = tf.placeholder(tf.float32,[BATCH_SIZE,*SHAPE,1])
-    rv['global_step'] = global_step=tf.Variable(0, trainable=False) 
     #weights = (rv['labels']*10+1)
 
-    rv['logits'] = define_unet(rv['imgs'],rv['seeds'])
+    rv['logits'] = define_unet(rv['imgs'],rv['region_seeds'],rv['boundary_seeds'])
     
     #rv['loss'] = tf.reduce_sum(tf.square(rv['logits']-rv['labels']))
     #loss_a = tf.reduce_mean((-rv['labels']*tf.log(1e-4+rv['logits'])-(1-rv['labels'])*tf.log(1e-4+1-rv['logits'])))
@@ -95,18 +96,23 @@ def define_graph():
                             logits = rv['logits']))
     loss_b = tf.reduce_mean(
                             tf.multiply(
-                            tf.square(rv['logits']-1),rv['seeds']))
+                            tf.square(rv['logits']-1),rv['region_seeds']))
+    loss_c = tf.reduce_mean(
+                            tf.multiply(
+                            tf.square(rv['logits']-0.5),rv['boundary_seeds']))
 
-    rv['loss'] = loss_a + 100*loss_b
+    rv['loss'] = loss_a + 100*loss_b + 10*loss_c
     
     tf.summary.scalar('loss', rv['loss'])
     tf.summary.scalar('loss_a', loss_a)
     tf.summary.scalar('loss_b', loss_b)
+    tf.summary.scalar('loss_c', loss_c)
     
-    rv['train_op'] = tf.train.AdamOptimizer(1e-4).minimize(rv['loss'],global_step = global_step)
+    rv['train_op'] = tf.train.AdamOptimizer(1e-4).minimize(rv['loss'])
     
     img = tf.cast(rv['imgs'],tf.uint8)
     label = 255 * tf.cast(rv['labels'],tf.uint8)
+    
     rv['segmentation'] = segmentation = 255 * tf.cast(tf.to_int32(rv['logits'] >= SEG_THRESHOLD),tf.uint8)
     
     rv['acc'] = tf.reduce_mean(tf.cast(tf.equal(label,rv['segmentation']),tf.float32))
@@ -165,7 +171,7 @@ def check(seed,stack):
     return True
     
     
-def grow(sess,g,stack,mask,rseeds,coord):
+def grow(sess,g,stack,mask,rseeds,bseeds,coord):
     #coord:(z,y,x)
     #segmentation = np.ones(dtype = np.float32,shape = stack.shape) * 100000
     segmentation = np.zeros(dtype = np.float32,shape = stack.shape)
@@ -173,9 +179,8 @@ def grow(sess,g,stack,mask,rseeds,coord):
     
     seeds = [(int(coord[0]),int(coord[1]),int(coord[2]))]
     visited = set()
-    num_iter = 0
     
-    while len(seeds) != 0 and num_iter < 1000:
+    while len(seeds) != 0:
     
         imgs = np.zeros(dtype = np.float32, shape = (BATCH_SIZE,*SHAPE,1))
         region_seeds = np.zeros(dtype = np.float32, shape = (BATCH_SIZE,*SHAPE,1))
@@ -189,6 +194,7 @@ def grow(sess,g,stack,mask,rseeds,coord):
             if np.all(mask[z-SHAPE[0]//2:z+SHAPE[0]//2,y-SHAPE[1]//2:y+SHAPE[0]//2,x-SHAPE[2]//2:x+SHAPE[2]//2] == 0):
                 continue
             img = stack[z-SHAPE[0]//2:z+SHAPE[0]//2,y-SHAPE[1]//2:y+SHAPE[0]//2,x-SHAPE[2]//2:x+SHAPE[2]//2]
+            bseed = bseeds[z-SHAPE[0]//2:z+SHAPE[0]//2,y-SHAPE[1]//2:y+SHAPE[0]//2,x-SHAPE[2]//2:x+SHAPE[2]//2]
             rseeds[z,y,x] = 1
             rseed = rseeds[z-SHAPE[0]//2:z+SHAPE[0]//2,y-SHAPE[1]//2:y+SHAPE[0]//2,x-SHAPE[2]//2:x+SHAPE[2]//2]
             rseeds[z-SHAPE[0]//2:z+SHAPE[0]//2,y-SHAPE[1]//2:y+SHAPE[0]//2,x-SHAPE[2]//2:x+SHAPE[2]//2] = 0
@@ -199,12 +205,14 @@ def grow(sess,g,stack,mask,rseeds,coord):
             r_d,r_h,r_w = img.shape
             imgs[cnt,:r_d,:r_h,:r_w] = img.reshape(r_d,r_h,r_w,1).astype(np.float32)
             region_seeds[cnt,:r_d,:r_h,:r_w] = rseed.reshape(r_d,r_h,r_w,1).astype(np.float32)
+            boundary_seeds[cnt,:r_d,:r_h,:r_w] = bseed.reshape(r_d,r_h,r_w,1).astype(np.float32)
             cnt = cnt + 1
             run_seeds.append(c)
             
           
         seg = sess.run(g['logits'], feed_dict = {  g['imgs']:imgs, 
-                                                   g['seeds']:region_seeds})
+                                                   g['region_seeds']:region_seeds, 
+                                                   g['boundary_seeds']:boundary_seeds})
           
         seg = seg.reshape((BATCH_SIZE,*SHAPE))
         for i in range(cnt):
@@ -216,13 +224,13 @@ def grow(sess,g,stack,mask,rseeds,coord):
             segmentation[z-SHAPE[0]//2:z+SHAPE[0]//2,y-SHAPE[1]//2:y+SHAPE[0]//2,x-SHAPE[2]//2:x+SHAPE[2]//2] =  prev + seg[i,:prev.shape[0],:prev.shape[1],:prev.shape[2]] * m
             new_seeds = find_seeds(segmentation,mask,(z,y,x),visited)
             seeds.extend(new_seeds)
-        num_iter = num_iter + 1
+        
     #segmentation[segmentation == 100000] = 0
     rv[segmentation >= SEG_THRESHOLD] = 1
     return rv
            
     
-def inference(stack,mask,rseeds):
+def inference(stack,mask,rseeds,bseeds):
     g = define_graph()
     with tf.Session() as s:
         saver = tf.train.Saver()
@@ -234,7 +242,7 @@ def inference(stack,mask,rseeds):
             zs,ys,xs = np.where(rseeds != 0)  
             z,y,x = zs[0],ys[0],xs[0]
             print('growing from ({},{},{})'.format(z,y,x))
-            t = grow(s,g,stack,mask,rseeds,(z,y,x))
+            t = grow(s,g,stack,mask,rseeds,bseeds,(z,y,x))
             segmentation[t == 1] = 1
         segmentation[mask == 0] = 0
         return segmentation
